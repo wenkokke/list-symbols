@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+
+# Set the default shell on all platforms.
+defaults:
+  run:
+    shell: sh
+
+jobs:
+  test:
+    name: |
+      ${{ format(
+            'Test on {0}',
+            ( startsWith(matrix.os, 'ubuntu-') && ( endsWith(matrix.os, '-arm') && 'Linux (aarch64)' || 'Linux (x86)' )
+            ) ||
+            ( startsWith(matrix.os, 'macOS-') && ( endsWith(matrix.os, '-intel') && 'macOS (x86)' || 'macOS (arm64)' )
+            ) ||
+            ( startsWith(matrix.os, 'windows-') && 'Windows (amd64)'
+            )
+          )
+       }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v6
+
+      - name: 🛠️ Setup Clang (Linux)
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-20 libclang-20-dev llvm-20-dev
+          Clang_DIR="/usr/lib/llvm-20/lib/cmake/clang/"
+          echo "Clang_DIR=$Clang_DIR" >> $GITHUB_ENV
+        env:
+          DEBIAN_FRONTEND: noninteractive
+
+      - name: 🛠️ Setup Clang (macOS)
+        if: ${{ runner.os == 'macOS' }}
+        run: |
+          brew install llvm@20
+          Clang_DIR="$(echo "$(brew --cellar llvm@20)/"*"/lib/cmake/clang")"
+          echo "Clang_DIR=$Clang_DIR" >> $GITHUB_ENV
+
+      - name: 🛠️ Setup Clang (Windows)
+        if: ${{ runner.os == 'Windows' }}
+        run: |
+          choco install llvm
+          ls -R "C:/Program Files/LLVM"
+
+      - name: 🗄️ Configure
+        run: cmake -B _build -DClang_DIR="$Clang_DIR"
+
+      - name: 🏗️ Build
+        run: cmake --build _build
+
+      - name: 🚀 Test
+        run: mkdir -p ./out && ./_build/list_symbols ./examples/ghc-rts/include/Rts.h > ./out/Rts.h.symbols
+
+      - name: 📦 Upload symbols
+        uses: actions/upload-artifact@v6
+        with:
+          name: Rts.h-${{ runner.os }}-${{ runner.arch }}.symbols
+          path: ./out/Rts.h.symbols
+
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - "ubuntu-24.04"
+          - "ubuntu-24.04-arm"
+          - "macOS-15"
+          - "macOS-15-intel"
